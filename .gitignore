@@ -1,0 +1,11 @@
+*.cpp
+*.txt
+*.json
+*.pt
+*.exe
+*.bin
+*.pth
+.vscode
+.venv
+__pycache__
+plwiki3
