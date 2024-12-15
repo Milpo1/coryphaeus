@@ -5,6 +5,9 @@ from dataclasses import dataclass
 import time
 import math
 
+shard_size = 10e5
+
+
 class TextDataset(Dataset):
     def __init__(self, data, block_size) -> None:
         self.data = data
@@ -70,6 +73,20 @@ class Trainer:
         return out
     
     def get_lr(self, cur_iter):
+        """
+        LR ^
+        |
+        |      /‾‾\          learning_rate
+        |     /    ‾‾\
+        |    /        ‾\
+        |   /           ‾\
+        |  /              \  min_lr_decayed
+        | /
+        min_lr
+        +------+----------+--> iter
+        0     warmup_    max_
+            end_iter   iters
+        """
         #first  LR warmup  from min_lr to learning_rate at (warmup_iter_ratio % of iters)
         config = self.config
         warmup_end_iter = config.warmup_iter_ratio * config.max_iters
