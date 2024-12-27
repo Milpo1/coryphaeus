@@ -50,6 +50,9 @@ model_config = GPTConfig(
     dropout=0.05,
 )
 
+device = torch.device("cuda:0" if torch.cuda.is_available() else "cpu")
+print(f"Using device: {device}")
+
 # Tokenizer
 tokenizer = tiktoken.get_encoding("gpt2")
 
@@ -68,10 +71,21 @@ val_dataset = TextDataset(data[n:], model_config.block_size)
 # Model initialization
 torch.set_float32_matmul_precision('high')
 model = WieszczGPT(model_config)
-model.to(model.device)
+state_dict = torch.load('model_state_dict_2024-12-27_18-30-06.pth', map_location=device)
+model.to(device)
+
+# Remove '_orig_mod.' prefix from keys, if present
+state_dict = {k.replace('_orig_mod.', ''): v for k, v in state_dict.items()}
+
+# Load state_dict
+missing, unexpected = model.load_state_dict(state_dict)
+if missing or unexpected:
+    print('Something went from when loading model state dict. missing, unexpected:')
+    print(missing)
+    print(unexpected)
+print('Model state dict loaded successfully')
 if torch.cuda.get_device_capability(0)[0] >= 7:
     model = torch.compile(model)
-
 
 # Training configuration
 train_config = TrainConfig(
@@ -79,7 +93,8 @@ train_config = TrainConfig(
     eval_iters=250,
     eval_interval=1000,
     total_batch_size=model_config.block_size * 36 * 14,
-    batch_size=36
+    batch_size=36,
+    checkpoint_interval=500 # Save checkpoint every 500 iterations
 )
 wandb.init(project="wieszcz-gpt",
             config={
@@ -87,7 +102,8 @@ wandb.init(project="wieszcz-gpt",
                 'eval_iters':250,
                 'eval_interval':1000,
                 'total_batch_size':model_config.block_size * 36 * 14,
-                'batch_size':36
+                'batch_size':36,
+                'checkpoint_interval': 500
               }
           )
 
@@ -108,9 +124,18 @@ torch.save(model.state_dict(),f"model_state_dict_{current_datetime}.pth")
 
 # Generation (after training)
 model.eval()
-context = torch.zeros((1, model_config.block_size), dtype=torch.long, device=model.device)
-gen = model.generate(context, max_new_tokens=1000)[0].tolist()
-print(tokenizer.decode(gen))
 
+def gen(text, max_new_tokens = 1,temperature=1):
+    in_tokens = tokenizer.encode(text)
+    context_tensor = torch.zeros(model_config.block_size, dtype=torch.long)
+    context_tensor[-len(in_tokens):]= torch.tensor(in_tokens, dtype=torch.long)
+    context_tensor = context_tensor.reshape(1,-1)
+    context_tensor = context_tensor.to(device)
+    # temperature = torch.tensor(temperature, dtype=torch.float).to(device)
+    # max_new_tokens = torch.tensor(max_new_tokens, dtype=torch.int32).to(device)
+    gen = model.generate(context_tensor, max_new_tokens=max_new_tokens,temperature=temperature)[0].tolist()
+    return text+tokenizer.decode(gen[-max_new_tokens:])
+
+print(gen("Hello",100,1))
 # Finish W&B run
 wandb.finish()

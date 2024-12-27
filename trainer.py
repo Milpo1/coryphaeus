@@ -6,6 +6,8 @@ from dataclasses import dataclass
 import time
 import math
 import wandb
+import os
+from datetime import datetime
 
 class TextDataset(Dataset):
     def __init__(self, data, block_size):
@@ -35,6 +37,8 @@ class TrainConfig:
     min_lr_iter_ratio: float = 0.1
     warmup_iter_ratio: float = 0.05
     grad_clip: float = 1.0
+    checkpoint_interval: int = 1000  # Save a checkpoint every 1000 iterations
+    checkpoint_dir: str = "checkpoints"  # Directory to save checkpoints
 
 class Trainer:
     def __init__(self, model, train_dataset, val_dataset=None, config=TrainConfig):
@@ -68,6 +72,7 @@ class Trainer:
         self.grad_accum_steps = (
             self.config.total_batch_size // (self.config.batch_size * self.block_size)
         )
+        os.makedirs(self.config.checkpoint_dir, exist_ok=True)
 
     @torch.no_grad()
     def estimate_loss(self):
@@ -115,6 +120,12 @@ class Trainer:
             )
         return min_lr_decayed
 
+    def save_checkpoint(self, iteration):
+        checkpoint_path = os.path.join(self.config.checkpoint_dir, f"model_checkpoint_{iteration}.pth")
+        torch.save(self.model.state_dict(), checkpoint_path)
+        print(f"Checkpoint saved to {checkpoint_path}")
+        wandb.save(checkpoint_path) # Save to wandb too
+
     def train(self):
         self.model.train()
         config = self.config
@@ -133,6 +144,9 @@ class Trainer:
                 wandb.log({"train_loss": losses["train"], "iter": i})
                 if "val" in losses:
                     wandb.log({"val_loss": losses["val"], "iter": i})
+
+            if i > 0 and i % config.checkpoint_interval == 0:
+                self.save_checkpoint(i)
 
             t0 = time.perf_counter()
             self.optimizer.zero_grad(set_to_none=True)
@@ -170,3 +184,6 @@ class Trainer:
             print(
                 f"step {i} | loss: {iter_loss:.4f} | time: {dt*1000:.2f} ms | lr: {lr:.7f}"
             )
+
+        # Save one last checkpoint at the end of training
+        self.save_checkpoint(config.max_iters)
