@@ -18,30 +18,34 @@ def set_seed(seed):
 
 set_seed(42)
 
-dataset = load_dataset("Salesforce/wikitext", 'wikitext-2-v1',split='train')
+dataset = load_dataset("HuggingFaceFW/fineweb-edu", name="sample-10BT", split="train", streaming=True)
 
 model_config = GPTConfig(block_size=384,vocab_size=5000,n_embed=256,n_heads=8,n_layers=4,dropout=0.15)
 
+import tiktoken
+tokenizer = tiktoken.get_encoding("gpt2")
+
+
 # %%
-from tokenizers import Tokenizer
-from tokenizers.models import BPE
-filename = f"tokenizer-wiki-{model_config.vocab_size}.json"
-if os.path.isfile(filename):
-    tokenizer = Tokenizer.from_file(filename)
-else:
-    tokenizer = Tokenizer(BPE(unk_token="[UNK]"))
+# from tokenizers import Tokenizer
+# from tokenizers.models import BPE
+# filename = f"tokenizer-wiki-{model_config.vocab_size}.json"
+# if os.path.isfile(filename):
+#     tokenizer = Tokenizer.from_file(filename)
+# else:
+#     tokenizer = Tokenizer(BPE(unk_token="[UNK]"))
 
-    from tokenizers.trainers import BpeTrainer
-    trainer = BpeTrainer(special_tokens=["[UNK]", "[CLS]", "[SEP]", "[PAD]", "[MASK]"],vocab=model_config.vocab_size,limit_alphabet=256)
+#     from tokenizers.trainers import BpeTrainer
+#     trainer = BpeTrainer(special_tokens=["[UNK]", "[CLS]", "[SEP]", "[PAD]", "[MASK]"],vocab=model_config.vocab_size,limit_alphabet=256)
 
-    # from tokenizers.pre_tokenizers import Whitespace
-    # tokenizer.pre_tokenizer = Whitespace()
+#     # from tokenizers.pre_tokenizers import Whitespace
+#     # tokenizer.pre_tokenizer = Whitespace()
 
-    # all_texts_iter = (row for split in ['train','validation','test'] for row in dataset[split]['text'])
-    texts_iter = (row for row in dataset['text'])
-    tokenizer.train_from_iterator(texts_iter, trainer)
+#     # all_texts_iter = (row for split in ['train','validation','test'] for row in dataset[split]['text'])
+#     texts_iter = (row for row in dataset['text'])
+#     tokenizer.train_from_iterator(texts_iter, trainer)
 
-    tokenizer.save(filename)
+#     tokenizer.save(filename)
 
 # %%
 # def tokenize_example(examples):
@@ -71,12 +75,13 @@ def encode_shard(shard):
     # print(shard["text"])
     # return np.arange(random.randint(10,10))
     encoded = tokenizer.encode(shard["text"])
-    return encoded.ids
+    return encoded
     # return np.array([ord(c) for c in shard],dtype=np.int32)
 def encode_dataset(dataset, shard_size, num_workers=2):
     shard_index = 0
     shard_tokens = np.zeros(shard_size, dtype=np.int32)
     current_index = 0
+    prev_logged_index = 0
     encoded = []  # List to store the encoded shards
 
     for document in dataset:
@@ -96,22 +101,26 @@ def encode_dataset(dataset, shard_size, num_workers=2):
                 shard_tokens[current_index:] = tokens[:tokens_fit]
                 print(f'data/shard{shard_index}.bin')
 
-                encoded.append(shard_tokens.copy().tolist())
-                # np.save(f'data/shard{shard_index}.bin', shard_tokens) # Uncomment to save to disk
+                # encoded.append(shard_tokens.copy().tolist())
+                np.save(f'data/shard{shard_index}.bin', shard_tokens) # Uncomment to save to disk
 
                 tokens = tokens[tokens_fit:]
                 current_index = 0 # current_index is reset to 0, since we saved the shard
                 tokens_overflowed -= shard_size
                 shard_index += 1
+        if current_index-prev_logged_index > 0.01*shard_size:
+            print(f"{current_index}/{shard_size}")
+            prev_logged_index = current_index
     
     # if current index is not 0, it means that we still have some token left
     if current_index > 0:
-        encoded.append(shard_tokens[:current_index].copy().tolist())
+        np.save(f'data/shard{shard_index}.bin', shard_tokens[:current_index]) # Uncomment to save to disk
 
     return encoded
 # %%
 if __name__ == '__main__':
-    encoded = encode_dataset(dataset,3000,4)
+    print("Begin tokenization")
+    encoded = encode_dataset(dataset,10**9,4)
     # print(''.join([chr(c) for c in encoded[-2]]))
 #     encode_dataset(dataset[:10000],100,4)
 # %%
